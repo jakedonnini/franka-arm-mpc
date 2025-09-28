@@ -14,44 +14,100 @@ A Model Predictive Control (MPC) implementation for the Franka Emika Panda robot
 This project requires the following libraries:
 
 ### Required Dependencies
-- **MuJoCo 3.3.6+** - Physics simulation engine
+- **MuJoCo 3.2+** - Physics simulation engine
 - **GLFW 3.4+** - OpenGL context and window management  
 - **Eigen 3.4.0+** - Linear algebra library
 - **OpenGL** - Graphics rendering (system library)
 
-### Installation
+## Quick Start
 
-#### Option 1: Manual Installation (Current Setup)
-1. Download and extract dependencies to your preferred location:
-   - [MuJoCo](https://github.com/google-deepmind/mujoco/releases) 
-   - [GLFW](https://www.glfw.org/download.html)
-   - [Eigen](https://eigen.tuxfamily.org/index.php?title=Main_Page)
+### Automated Setup (Recommended)
 
-2. Update the paths in `CMakeLists.txt`:
-   ```cmake
-   set(MUJOCO_DIR "path/to/mujoco")
-   set(GLFW_DIR "path/to/glfw") 
-   set(EIGEN_DIR "path/to/eigen")
-   ```
-
-#### Option 2: Using vcpkg (Recommended)
+**Linux/macOS:**
 ```bash
-vcpkg install glfw3 eigen3
-# Note: MuJoCo needs to be installed manually
+chmod +x setup.sh
+./setup.sh
 ```
 
-#### Option 3: Using Conan
+**Windows:**
+```cmd
+setup.bat
+```
+
+The setup script will guide you through different installation options and automatically build the project.
+
+### Manual Installation Options
+
+#### Option 1: System Package Managers
+
+**Ubuntu/Debian:**
 ```bash
-conan install . --build=missing
+sudo apt-get install cmake build-essential libglfw3-dev libeigen3-dev libgl1-mesa-dev
+```
+
+**macOS (with Homebrew):**
+```bash
+brew install cmake glfw eigen
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S cmake gcc glfw eigen mesa
+```
+
+#### Option 2: vcpkg (Cross-platform)
+```bash
+# Install vcpkg first: https://github.com/Microsoft/vcpkg
+vcpkg install glfw3 eigen3
+
+# Build with vcpkg
+mkdir build && cd build
+cmake -DUSE_VCPKG=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
+cmake --build . --config Release
+```
+
+#### Option 3: CMake FetchContent (Internet Required)
+```bash
+mkdir build && cd build
+cmake -DUSE_FETCHCONTENT=ON ..
+cmake --build . --config Release
+```
+
+#### Option 4: Manual Download
+```bash
+# Set environment variables for dependency locations
+export MUJOCO_DIR=/path/to/mujoco
+export GLFW_DIR=/path/to/glfw
+export EIGEN_DIR=/path/to/eigen
+
+mkdir build && cd build
+cmake ..
+cmake --build . --config Release
 ```
 
 ## Building
 
+### Basic Build
 ```bash
 mkdir build
 cd build
 cmake ..
 cmake --build . --config Release
+```
+
+### Build Options
+```bash
+# Use vcpkg dependencies
+cmake -DUSE_VCPKG=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
+
+# Download dependencies automatically  
+cmake -DUSE_FETCHCONTENT=ON ..
+
+# Disable automatic MuJoCo download
+cmake -DDOWNLOAD_MUJOCO=OFF ..
+
+# Debug build
+cmake -DCMAKE_BUILD_TYPE=Debug ..
 ```
 
 ## Usage

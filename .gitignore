@@ -3,6 +3,7 @@ build/
 bin/
 lib/
 out/
+deps/
 
 # IDE files
 .vs/
@@ -17,6 +18,9 @@ mujoco*/
 glfw*/
 eigen*/
 mujoco_menagerie*/
+
+# Configuration files (user-specific)
+config.cmake
 
 # Compiled binaries
 *.exe

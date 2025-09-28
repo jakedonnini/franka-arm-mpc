@@ -1,0 +1,44 @@
+# Configuration file for Franka Arm MPC
+# Copy this to config.cmake and modify paths as needed
+
+# ============================================================================
+# Dependency Paths (Manual Installation)
+# ============================================================================
+
+# Uncomment and set paths for manual installation
+# set(MUJOCO_DIR "C:/path/to/mujoco" CACHE PATH "MuJoCo installation directory")
+# set(GLFW_DIR "C:/path/to/glfw" CACHE PATH "GLFW installation directory") 
+# set(EIGEN_DIR "C:/path/to/eigen" CACHE PATH "Eigen installation directory")
+
+# ============================================================================
+# Build Options
+# ============================================================================
+
+# Choose dependency management method
+# set(USE_VCPKG ON CACHE BOOL "Use vcpkg for dependencies")
+# set(USE_FETCHCONTENT ON CACHE BOOL "Use CMake FetchContent for dependencies")
+# set(DOWNLOAD_MUJOCO ON CACHE BOOL "Automatically download MuJoCo if not found")
+
+# Build configuration
+# set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type")
+# set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard version")
+
+# ============================================================================
+# Example Configurations
+# ============================================================================
+
+# Example 1: Windows with manual installation
+# set(MUJOCO_DIR "C:/Users/username/mujoco-3.2.3" CACHE PATH "")
+# set(GLFW_DIR "C:/Users/username/glfw-3.4" CACHE PATH "")
+# set(EIGEN_DIR "C:/Users/username/eigen-3.4.0" CACHE PATH "")
+
+# Example 2: Linux system packages
+# Dependencies will be found automatically in standard locations
+
+# Example 3: vcpkg
+# set(USE_VCPKG ON CACHE BOOL "")
+# set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+
+# Example 4: Automatic download
+# set(USE_FETCHCONTENT ON CACHE BOOL "")
+# set(DOWNLOAD_MUJOCO ON CACHE BOOL "")
