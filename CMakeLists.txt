@@ -210,6 +210,10 @@ if(NOT MUJOCO_INCLUDE_DIR OR NOT MUJOCO_LIBRARY)
     endif()
 endif()
 
+# Determine MuJoCo directory from library path for DLL copying
+get_filename_component(MUJOCO_LIB_DIR ${MUJOCO_LIBRARY} DIRECTORY)
+get_filename_component(MUJOCO_ROOT_DIR ${MUJOCO_LIB_DIR} DIRECTORY)
+
 # Create MuJoCo imported target
 add_library(mujoco_imported UNKNOWN IMPORTED)
 set_target_properties(mujoco_imported PROPERTIES
@@ -247,11 +251,27 @@ if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE /W4)
     # Copy DLLs on Windows
     if(WIN32)
-        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${MUJOCO_DIR}/bin/mujoco.dll"
-                $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        # Find the MuJoCo DLL
+        find_file(MUJOCO_DLL
+            NAMES mujoco.dll
+            PATHS 
+                "${MUJOCO_ROOT_DIR}/bin"
+                "${MUJOCO_ROOT_DIR}/lib"
+                "${MUJOCO_LIB_DIR}"
+            DOC "MuJoCo DLL"
         )
+        
+        if(MUJOCO_DLL)
+            add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${MUJOCO_DLL}"
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}>
+                COMMENT "Copying MuJoCo DLL to output directory"
+            )
+            message(STATUS "Will copy MuJoCo DLL: ${MUJOCO_DLL}")
+        else()
+            message(WARNING "MuJoCo DLL not found - you may need to copy mujoco.dll manually")
+        endif()
     endif()
 else()
     target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -pedantic)
