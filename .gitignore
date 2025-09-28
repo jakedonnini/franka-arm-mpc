@@ -1,0 +1,46 @@
+# Build directories
+build/
+bin/
+lib/
+out/
+
+# IDE files
+.vs/
+.vscode/
+*.vcxproj
+*.vcxproj.filters
+*.sln
+*.user
+
+# Dependencies (downloaded separately)
+mujoco*/
+glfw*/
+eigen*/
+mujoco_menagerie*/
+
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+*~
+
+# Object files
+*.o
+*.obj
