@@ -18,7 +18,7 @@ Eigen::Matrix4d Ai(double a_i, double alpha_i, double d_i, double theta_i) {
 
 
 // Forward kinematics function
-void forwardKinematics(const std::vector<double>& q,
+void forwardKinematics(Eigen::Vector<double, 7>& q,
              Eigen::Matrix<double, 8, 3>& jointPositions,
              Eigen::Matrix4d& T0e,
              std::vector<Eigen::Matrix4d>& T_list)
@@ -72,4 +72,58 @@ void forwardKinematics(const std::vector<double>& q,
     jointPositions.row(5) = (T05*T05_offset*base).head<3>();
     jointPositions.row(6) = (T06*T06_offset*base).head<3>();
     jointPositions.row(7) = (T0e*base).head<3>();
+}
+
+// create the jacobian function
+void computeJacobian(const Eigen::Vector<double, 7>& q,
+             const std::vector<Eigen::Matrix4d>& T_list,
+             Eigen::Matrix<double, 6, 7>& J)
+{
+    (void)q; // Suppress unused parameter warning - q not needed as jacobian computed from T_list
+    Eigen::Vector3d pe = T_list.back().block<3,1>(0,3); // end-effector position
+
+    for (int i = 0; i < 7; ++i) {
+        Eigen::Vector3d zi = T_list[i].block<3,1>(0,2); // z-axis of the i-th joint
+        Eigen::Vector3d pi = T_list[i].block<3,1>(0,3); // position of the i-th joint
+
+        Eigen::Vector3d Ji_pos = zi.cross(pe - pi);
+        Eigen::Vector3d Ji_ori = zi;
+
+        J.block<3,1>(0,i) = Ji_pos;
+        J.block<3,1>(3,i) = Ji_ori;
+    }
+}
+
+// difference to target function
+void diff_to_target(const Eigen::Matrix4d& T_current, const Eigen::Matrix4d& T_target, Eigen::VectorXd& dq) {
+    Eigen::Vector3d p_current = T_current.block<3,1>(0,3);
+    Eigen::Vector3d p_target = T_target.block<3,1>(0,3);
+    Eigen::Vector3d dp = p_target - p_current;
+
+    Eigen::Matrix3d R_current = T_current.block<3,3>(0,0);
+    Eigen::Matrix3d R_target = T_target.block<3,3>(0,0);
+    Eigen::Matrix3d R_diff = R_target * R_current.transpose();
+    Eigen::AngleAxisd angleAxis(R_diff);
+    Eigen::Vector3d dphi = angleAxis.angle() * angleAxis.axis();
+
+    Eigen::VectorXd dx(6);
+    dx.head<3>() = dp;
+    dx.tail<3>() = dphi;
+
+    // Simple proportional control for demonstration
+    double gain = 1.0;
+    
+    // Ensure dq has the right size (should match the number of DOFs)
+    if (dq.size() < 7) {
+        dq.resize(7);
+    }
+    
+    // For now, just use the first 7 components (or available DOFs)
+    int min_size = std::min(static_cast<int>(dq.size()), 7);
+    dq.head(min_size) = (gain * dx).head(min_size);
+    
+    // Zero out any remaining DOFs if dq is larger than 7
+    if (dq.size() > 7) {
+        dq.tail(dq.size() - 7).setZero();
+    }
 }

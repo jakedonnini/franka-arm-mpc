@@ -5,6 +5,12 @@
 #include "kinematics.h"
 #include <GLFW/glfw3.h>
 
+// Suppress warnings from external libraries
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4127) // conditional expression is constant (Eigen)
+#endif
+
 mjvCamera cam; 
 mjvOption opt; 
 mjvScene scn; 
@@ -14,9 +20,9 @@ GLFWwindow* window;
 const char* MODEL_XML = "C:/Users/jaked/Documents/Physics_Sim/mujoco_menagerie-main/mujoco_menagerie-main/franka_emika_panda/mjx_panda.xml";
 
 int main() {
-    char err[1000] = "Could not load XML";
-    mjModel* m = mj_loadXML(MODEL_XML, NULL, err, sizeof(err));
-    if (!m) { std::cerr << "Failed to load model: " << err << std::endl; return 1; }
+    char error_msg[1000] = "Could not load XML";
+    mjModel* m = mj_loadXML(MODEL_XML, NULL, error_msg, sizeof(error_msg));
+    if (!m) { std::cerr << "Failed to load model: " << error_msg << std::endl; return 1; }
     mjData* d = mj_makeData(m);
     if (!d) { mj_deleteModel(m); std::cerr << "Failed to allocate data\n"; return 1; }
 
@@ -52,36 +58,100 @@ int main() {
             dof_addr.push_back(m->jnt_dofadr[jid]);
         }
     }
-    int controlled_dofs = (int)dof_addr.size();
+
+    // Check we found all 7 joints
+    const int controlled_dofs = 7;
+    if (controlled_dofs != (int)dof_addr.size()) {
+        std::cerr << "Warning: Found " << dof_addr.size() << " DOFs, but expected " << controlled_dofs << ".\n";
+    }
+
     std::cout << "Found " << controlled_dofs << " Panda joints to control.\n";
 
-    std::vector<double> q_target(controlled_dofs, 0.0);
-    if (controlled_dofs >= 1) q_target[0] = 0.4;
+    // Initialize target joint positions to zero (home position)
+    Eigen::Vector<double, controlled_dofs> q_target = Eigen::Vector<double, controlled_dofs>::Zero();
 
-    const double Kp = 200.0;
-    const double Kd = 2.0 * std::sqrt(Kp);
+    const double Kp = 0.01;
+    // Removed Kd as it was unused - add back if needed for damping control
 
     Eigen::Matrix<double, 8, 3> jointPositions;
     Eigen::Matrix4d T0e;
     std::vector<Eigen::Matrix4d> T_list;
+    // jacobian
+    Eigen::Matrix<double, 6, controlled_dofs> J;
+    Eigen::Matrix<double, 6, controlled_dofs> J_mujoco;
+    Eigen::Matrix<double, controlled_dofs, 6> J_pseudoInv;  // Pseudoinverse is 7×6
+    // target end-effector position (4x4 homogeneous transform)
+    Eigen::Matrix4d T_target = Eigen::Matrix4d::Identity();
+    Eigen::Vector<double, controlled_dofs> u;
+
 
     while (!glfwWindowShouldClose(window)) {
         for (int i=0;i<m->nv;i++) d->qfrc_applied[i] = 0.0;
-        for (int i = 0; i < controlled_dofs; ++i) {
-            int qadr = qpos_addr[i];
-            int dadr = dof_addr[i];
-            double q = d->qpos[qadr];
-            double qdot = d->qvel[dadr];
-            double err = q_target[i] - q;
-            double tau = Kp*err - Kd*qdot;
-            d->qfrc_applied[dadr] += tau;
+
+        // Debug: print current joint angles
+        std::cout << "q_target: " << q_target.transpose() << std::endl;
+        
+        // use old custom functions to compute FK and Jacobian
+        // Create a mutable copy for forwardKinematics (function may modify it)
+        Eigen::Vector<double, controlled_dofs> q_current = q_target;
+        forwardKinematics(q_current, /*out*/ jointPositions, /*out*/ T0e, /*out*/ T_list);
+        computeJacobian(q_current, T_list, J);
+
+        // std::cout << "Jacobian:\n" << J << std::endl;
+
+        // compute jacobian with mujoco (using end-effector site)
+        if (gripper_site_id >= 0) {
+            std::vector<double> jacp(3 * m->nv);  // translational jacobian
+            std::vector<double> jacr(3 * m->nv);  // rotational jacobian
+            mj_jacSite(m, d, jacp.data(), jacr.data(), gripper_site_id);
+            
+            // Copy relevant parts to our Jacobian matrix (first 7 DOFs)
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < std::min(controlled_dofs, 7); ++j) {
+                    J_mujoco(i, j) = jacp[i * m->nv + dof_addr[j]];
+                    J_mujoco(i + 3, j) = jacr[i * m->nv + dof_addr[j]];
+                }
+            }
+            // std::cout << "Mujoco Jacobian:\n" << J_mujoco << std::endl;
+            // std::cout << "Difference in Jacobians:\n" << J - J_mujoco << std::endl;
+        } else {
+            std::cout << "Gripper site not found, skipping MuJoCo Jacobian comparison\n";
         }
 
-        forwardKinematics(q_target, /*out*/ jointPositions, /*out*/ T0e, /*out*/ T_list);
-        // print T0e
-        //std::cout << "T0e:\n" << T0e << std::endl;
-        // print end-effector position
-        std::cout << "End-effector Position:\n" << T0e.block<3,1>(0,3) << std::endl;
+        // move end-effector to target
+        T_target.block<3,1>(0,3) = Eigen::Vector3d(0.5, 0.5, 0.5);
+        // compute inverse kinematics
+        // find the difference in joint position from current to target
+        Eigen::VectorXd dq(controlled_dofs);
+        diff_to_target(T0e, T_target, /*inout*/ dq);
+        std::cout << "dq: " << dq.transpose() << std::endl;
+        std::cout << "T0e:\n" << T0e << std::endl;
+        std::cout << "T_target:\n" << T_target << std::endl;
+
+        // Debug: Check Jacobian
+        std::cout << "J matrix:\n" << J << std::endl;
+        
+        // Compute pseudoinverse using SVD (more robust than direct inverse)
+        auto svd = J.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
+        
+        // Check for singularities
+        double tolerance = 1e-6;
+        auto singularValues = svd.singularValues();
+        std::cout << "Singular values: " << singularValues.transpose() << std::endl;
+        
+        // Compute pseudoinverse with regularization
+        J_pseudoInv = svd.matrixV() * (singularValues.array() > tolerance).select(singularValues.array().inverse(), 0.0).matrix().asDiagonal() * svd.matrixU().transpose();
+
+        // apply P control to reach target joint positions
+        u = Kp * J_pseudoInv * dq;
+        std::cout << "u: " << u.transpose() << std::endl;
+        
+        // update target joint positions to mujoco
+        // q_target += u;
+
+        for (int i = 0; i < controlled_dofs; ++i) {
+            d->qpos[qpos_addr[i]] = q_target[i];
+        }
 
         mj_step(m, d);
 
@@ -120,3 +190,7 @@ int main() {
     std::cout << "Simulation closed.\n";
     return 0;
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif

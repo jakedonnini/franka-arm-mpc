@@ -248,7 +248,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 # Compiler-specific options
 if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /W4)
+    target_compile_options(${PROJECT_NAME} PRIVATE 
+        /W4                     # High warning level
+        /wd4127                 # Disable "conditional expression is constant" (common in Eigen)
+        /wd4189                 # Disable "local variable is initialized but not referenced"
+    )
     # Copy DLLs on Windows
     if(WIN32)
         # Find the MuJoCo DLL
