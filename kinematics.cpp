@@ -94,36 +94,87 @@ void computeJacobian(const Eigen::Vector<double, 7>& q,
     }
 }
 
-// difference to target function
-void diff_to_target(const Eigen::Matrix4d& T_current, const Eigen::Matrix4d& T_target, Eigen::VectorXd& dq) {
+// difference to target function (Euclidean distance only)
+Eigen::Vector3d diff_to_target(const Eigen::Matrix4d& T_current, const Eigen::Matrix4d& T_target) {
     Eigen::Vector3d p_current = T_current.block<3,1>(0,3);
     Eigen::Vector3d p_target = T_target.block<3,1>(0,3);
-    Eigen::Vector3d dp = p_target - p_current;
+    Eigen::Vector3d linear_v = p_target - p_current;
+    return linear_v;
+}
 
-    Eigen::Matrix3d R_current = T_current.block<3,3>(0,0);
-    Eigen::Matrix3d R_target = T_target.block<3,3>(0,0);
-    Eigen::Matrix3d R_diff = R_target * R_current.transpose();
-    Eigen::AngleAxisd angleAxis(R_diff);
-    Eigen::Vector3d dphi = angleAxis.angle() * angleAxis.axis();
-
-    Eigen::VectorXd dx(6);
-    dx.head<3>() = dp;
-    dx.tail<3>() = dphi;
-
-    // Simple proportional control for demonstration
-    double gain = 1.0;
+// Helper function for End Effector Orientation Task
+Eigen::Vector3d calcAngDiff(const Eigen::Matrix3d& R_des, const Eigen::Matrix3d& R_curr) {
+    // Compute the rotation matrix from current to desired orientation
+    Eigen::Matrix3d R_diff = R_curr * R_des.transpose();
     
-    // Ensure dq has the right size (should match the number of DOFs)
-    if (dq.size() < 7) {
-        dq.resize(7);
+    // Extract the axis of rotation from the skew-symmetric part of R_diff
+    // The skew-symmetric part is (R_diff - R_diff.T) / 2
+    Eigen::Matrix3d skew_sym = (R_diff - R_diff.transpose()) / 2.0;
+    
+    // Extract the components of the omega vector (axis of rotation)
+    // From the skew-symmetric matrix: [0 -z y; z 0 -x; -y x 0]
+    // The axis vector is [x, y, z] = [skew(2,1), skew(0,2), skew(1,0)]
+    Eigen::Vector3d omega;
+    omega[0] = -skew_sym(2, 1);  // -(-z) = z component  
+    omega[1] = -skew_sym(0, 2);  // -(y) = -y component
+    omega[2] = -skew_sym(1, 0);  // -(-x) = x component
+    
+    return omega;
+}
+
+// IK velocity solver implementing the Python behavior
+Eigen::Vector<double, 7> IK_velocity(const Eigen::Vector<double, 7>& q_in,
+                                     const Eigen::Vector3d& v_in,
+                                     const Eigen::Vector3d& omega_in) {
+    // Build Jacobian at q_in using existing forwardKinematics/computeJacobian
+    Eigen::Vector<double, 7> q = q_in; // mutable copy for forwardKinematics
+    Eigen::Matrix<double, 8, 3> jointPositions;
+    Eigen::Matrix4d T0e;
+    std::vector<Eigen::Matrix4d> T_list;
+    forwardKinematics(q, jointPositions, T0e, T_list);
+
+    Eigen::Matrix<double, 6, 7> J;
+    computeJacobian(q, T_list, J);
+
+    // Build target 6x1 velocity [v; omega]
+    Eigen::Matrix<double, 6, 1> target;
+    target.head<3>() = v_in;
+    target.tail<3>() = omega_in;
+
+    // Filter rows with NaN in target
+    std::vector<int> validRows;
+    validRows.reserve(6);
+    for (int i = 0; i < 6; ++i) {
+        if (!std::isnan(target[i])) {
+            validRows.push_back(i);
+        }
     }
-    
-    // For now, just use the first 7 components (or available DOFs)
-    int min_size = std::min(static_cast<int>(dq.size()), 7);
-    dq.head(min_size) = (gain * dx).head(min_size);
-    
-    // Zero out any remaining DOFs if dq is larger than 7
-    if (dq.size() > 7) {
-        dq.tail(dq.size() - 7).setZero();
+
+    // If no constraints, return zeros
+    Eigen::Vector<double, 7> dq = Eigen::Vector<double, 7>::Zero();
+    if (validRows.empty()) {
+        return dq;
     }
+
+    // Build filtered J and target
+    const int r = static_cast<int>(validRows.size());
+    Eigen::MatrixXd Jf(r, 7);
+    Eigen::VectorXd tf(r);
+    for (int i = 0; i < r; ++i) {
+        Jf.row(i) = J.row(validRows[i]);
+        tf[i] = target[validRows[i]];
+    }
+
+    // Solve least-squares Jf * dq = tf with minimal-norm solution
+    // Use SVD for robustness; Eigen's JacobiSVD with thin U/V is sufficient
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(Jf, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    const auto& S = svd.singularValues();
+    Eigen::VectorXd Sinv = S;
+    double tol = 1e-8;
+    for (int i = 0; i < S.size(); ++i) {
+        Sinv[i] = (S[i] > tol) ? 1.0 / S[i] : 0.0;
+    }
+    dq = svd.matrixV() * Sinv.asDiagonal() * svd.matrixU().transpose() * tf;
+
+    return dq;
 }

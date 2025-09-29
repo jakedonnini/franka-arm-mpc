@@ -68,9 +68,11 @@ int main() {
     std::cout << "Found " << controlled_dofs << " Panda joints to control.\n";
 
     // Initialize target joint positions to zero (home position)
-    Eigen::Vector<double, controlled_dofs> q_target = Eigen::Vector<double, controlled_dofs>::Zero();
+    Eigen::Vector<double, controlled_dofs> q_target = Eigen::Vector<double, controlled_dofs>::Zero(); // calculated current joint angles
+    Eigen::Vector<double, controlled_dofs> q_current = Eigen::Vector<double, controlled_dofs>::Zero(); // actual current joint angles
 
-    const double Kp = 0.01;
+
+    const double Kp = 0.05;
     // Removed Kd as it was unused - add back if needed for damping control
 
     Eigen::Matrix<double, 8, 3> jointPositions;
@@ -79,25 +81,26 @@ int main() {
     // jacobian
     Eigen::Matrix<double, 6, controlled_dofs> J;
     Eigen::Matrix<double, 6, controlled_dofs> J_mujoco;
-    Eigen::Matrix<double, controlled_dofs, 6> J_pseudoInv;  // Pseudoinverse is 7×6
     // target end-effector position (4x4 homogeneous transform)
     Eigen::Matrix4d T_target = Eigen::Matrix4d::Identity();
     Eigen::Vector<double, controlled_dofs> u;
+    Eigen::Vector<double, controlled_dofs> dq;
+
 
 
     while (!glfwWindowShouldClose(window)) {
         for (int i=0;i<m->nv;i++) d->qfrc_applied[i] = 0.0;
+        // check the current joint angles
+        for (int i = 0; i < controlled_dofs; ++i) {
+            q_current[i] = d->qpos[qpos_addr[i]];
+        }
 
         // Debug: print current joint angles
         std::cout << "q_target: " << q_target.transpose() << std::endl;
         
         // use old custom functions to compute FK and Jacobian
         // Create a mutable copy for forwardKinematics (function may modify it)
-        Eigen::Vector<double, controlled_dofs> q_current = q_target;
-        forwardKinematics(q_current, /*out*/ jointPositions, /*out*/ T0e, /*out*/ T_list);
-        computeJacobian(q_current, T_list, J);
-
-        // std::cout << "Jacobian:\n" << J << std::endl;
+        forwardKinematics(q_target, /*out*/ jointPositions, /*out*/ T0e, /*out*/ T_list);
 
         // compute jacobian with mujoco (using end-effector site)
         if (gripper_site_id >= 0) {
@@ -119,35 +122,26 @@ int main() {
         }
 
         // move end-effector to target
-        T_target.block<3,1>(0,3) = Eigen::Vector3d(0.5, 0.5, 0.5);
-        // compute inverse kinematics
-        // find the difference in joint position from current to target
-        Eigen::VectorXd dq(controlled_dofs);
-        diff_to_target(T0e, T_target, /*inout*/ dq);
-        std::cout << "dq: " << dq.transpose() << std::endl;
+        T_target.block<3,1>(0,3) = Eigen::Vector3d(0.3, 0.0, 0.5);
+
+        // Compute Euclidean position difference (3D)
+        Eigen::Vector3d dp = diff_to_target(T0e, T_target);
         std::cout << "T0e:\n" << T0e << std::endl;
         std::cout << "T_target:\n" << T_target << std::endl;
+        std::cout << "dp: " << dp.transpose() << std::endl;
 
-        // Debug: Check Jacobian
-        std::cout << "J matrix:\n" << J << std::endl;
+        // get the change in joint angles to move towards target
+        Eigen::Vector3d omega = calcAngDiff(T_target.block<3,3>(0,0), T0e.block<3,3>(0,0));
+        std::cout << "omega (orientation error): " << omega.transpose() << std::endl;
         
-        // Compute pseudoinverse using SVD (more robust than direct inverse)
-        auto svd = J.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
-        
-        // Check for singularities
-        double tolerance = 1e-6;
-        auto singularValues = svd.singularValues();
-        std::cout << "Singular values: " << singularValues.transpose() << std::endl;
-        
-        // Compute pseudoinverse with regularization
-        J_pseudoInv = svd.matrixV() * (singularValues.array() > tolerance).select(singularValues.array().inverse(), 0.0).matrix().asDiagonal() * svd.matrixU().transpose();
+        dq = IK_velocity(q_target, dp, omega);
 
         // apply P control to reach target joint positions
-        u = Kp * J_pseudoInv * dq;
+        u = Kp * dq;
         std::cout << "u: " << u.transpose() << std::endl;
         
         // update target joint positions to mujoco
-        // q_target += u;
+        q_target += u;
 
         for (int i = 0; i < controlled_dofs; ++i) {
             d->qpos[qpos_addr[i]] = q_target[i];

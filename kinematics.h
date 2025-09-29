@@ -31,14 +31,35 @@ void computeJacobian(const Eigen::Vector<double, 7>& q,
                      const std::vector<Eigen::Matrix4d>& T_list,
                      Eigen::Matrix<double, 6, 7>& J);
 
-// Compute the difference in joint angles to move the end-effector towards the target
+// Compute the Euclidean position difference from current to target end-effector pose
 // INPUT:
 //   T_current - current end-effector pose (4x4 homogeneous transform) 
 //   T_target - target end-effector pose (4x4 homogeneous transform)
-// INOUT:
-//   dq - vector of joint angle differences (size 7)
-void diff_to_target(const Eigen::Matrix4d& T_current,
-                    const Eigen::Matrix4d& T_target,
-                    Eigen::VectorXd& dq);
+// OUTPUT:
+//   Returns a 3D vector dp = p_target - p_current
+Eigen::Vector3d diff_to_target(const Eigen::Matrix4d& T_current,
+                               const Eigen::Matrix4d& T_target);
+
+// Helper function for End Effector Orientation Task
+// Computes the axis of rotation from the current orientation to the target orientation
+// INPUT:
+//   R_des - 3x3 matrix representing the desired orientation from end effector to world
+//   R_curr - 3x3 matrix representing the current end effector orientation  
+// OUTPUT:
+//   omega - 3-element vector containing the axis of rotation from current to desired frame
+//           The magnitude of this vector is sin(angle), where angle is the rotation angle
+Eigen::Vector3d calcAngDiff(const Eigen::Matrix3d& R_des, const Eigen::Matrix3d& R_curr);
+
+// Inverse Kinematics velocity solver (least-squares with minimal-norm solution)
+// INPUTS:
+//   q_in      - 7x1 vector of current joint configuration
+//   v_in      - 3x1 desired linear velocity in world frame; NaN components are unconstrained
+//   omega_in  - 3x1 desired angular velocity in world frame; NaN components are unconstrained
+// OUTPUT:
+//   Returns dq (7x1) joint velocities minimizing least squares error; if underdetermined,
+//   returns the minimal L2-norm solution. If all targets are unconstrained, returns zeros.
+Eigen::Vector<double, 7> IK_velocity(const Eigen::Vector<double, 7>& q_in,
+                                     const Eigen::Vector3d& v_in,
+                                     const Eigen::Vector3d& omega_in);
 
 #endif // KINEMATICS_H
