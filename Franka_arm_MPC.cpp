@@ -3,6 +3,7 @@
 #include <cmath>
 #include "mujoco/mujoco.h"
 #include "kinematics.h"
+#include "Optimizer.h"
 #include <GLFW/glfw3.h>
 
 // Suppress warnings from external libraries
@@ -31,6 +32,9 @@ int main() {
     window = glfwCreateWindow(1200, 900, "MuJoCo Panda", NULL, NULL);
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
+
+    // create the optimizer class
+    Optimizer optimizer;
 
     // camera
     mjv_defaultCamera(&cam);
@@ -95,7 +99,6 @@ int main() {
         // Debug: print current joint angles
         std::cout << "q_target: " << q_target.transpose() << std::endl;
         
-
         // move end-effector to target
         T_target.block<3,1>(0,3) = Eigen::Vector3d(0.3, 0.0, 0.5);
         // rotation
@@ -103,6 +106,8 @@ int main() {
             1.0, 0.0, 0.0,   // row 1
             0.0, 1.0, 0.0,   // row 2
             0.0, 0.0, 1.0;   // row 3
+
+        Eigen::Vector<double, 7> q_next = optimizer.step(q_current, T_target);
 
         // Compute Euclidean position difference (3D)
         Eigen::Vector3d dp = diff_to_target(T0e, T_target);
@@ -114,14 +119,7 @@ int main() {
         Eigen::Vector3d omega = calcAngDiff(T_target.block<3,3>(0,0), T0e.block<3,3>(0,0));
         std::cout << "omega (orientation error): " << omega.transpose() << std::endl;
         
-        dq = IK_velocity(q_current, dp, omega);
-
-        // apply P control to reach target joint positions
-        u = Kp * dq;
-        std::cout << "u: " << u.transpose() << std::endl;
-        
-        // update target joint positions to mujoco
-        q_target += u;
+        q_target = q_next;
 
         for (int i = 0; i < controlled_dofs; ++i) {
             // check to make sure we don't exceed joint limits

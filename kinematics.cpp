@@ -122,8 +122,6 @@ Eigen::Vector3d calcAngDiff(const Eigen::Matrix3d& R_des, const Eigen::Matrix3d&
     return omega;
 }
 
-
-
 // IK velocity solver implementing the Python behavior
 Eigen::Vector<double, 7> IK_velocity(const Eigen::Vector<double, 7>& q_in,
                                      const Eigen::Vector3d& v_in,

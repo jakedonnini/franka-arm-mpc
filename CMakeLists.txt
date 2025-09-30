@@ -229,10 +229,12 @@ set_target_properties(mujoco_imported PROPERTIES
 set(SOURCES
     Franka_arm_MPC.cpp
     kinematics.cpp
+    Optimizer.cpp
 )
 
 set(HEADERS
     kinematics.h
+    Optimizer.h
 )
 
 # Create executable
