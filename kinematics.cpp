@@ -122,6 +122,8 @@ Eigen::Vector3d calcAngDiff(const Eigen::Matrix3d& R_des, const Eigen::Matrix3d&
     return omega;
 }
 
+
+
 // IK velocity solver implementing the Python behavior
 Eigen::Vector<double, 7> IK_velocity(const Eigen::Vector<double, 7>& q_in,
                                      const Eigen::Vector3d& v_in,
@@ -135,6 +137,8 @@ Eigen::Vector<double, 7> IK_velocity(const Eigen::Vector<double, 7>& q_in,
 
     Eigen::Matrix<double, 6, 7> J;
     computeJacobian(q, T_list, J);
+
+    std::cout << "J:\n" << J << std::endl;
 
     // Build target 6x1 velocity [v; omega]
     Eigen::Matrix<double, 6, 1> target;
@@ -165,6 +169,8 @@ Eigen::Vector<double, 7> IK_velocity(const Eigen::Vector<double, 7>& q_in,
         tf[i] = target[validRows[i]];
     }
 
+    std::cout << "Jf:\n" << Jf << std::endl;
+
     // Solve least-squares Jf * dq = tf with minimal-norm solution
     // Use SVD for robustness; Eigen's JacobiSVD with thin U/V is sufficient
     Eigen::JacobiSVD<Eigen::MatrixXd> svd(Jf, Eigen::ComputeThinU | Eigen::ComputeThinV);
@@ -177,4 +183,24 @@ Eigen::Vector<double, 7> IK_velocity(const Eigen::Vector<double, 7>& q_in,
     dq = svd.matrixV() * Sinv.asDiagonal() * svd.matrixU().transpose() * tf;
 
     return dq;
+}
+
+// Compute distance (m) and angle (rad) between two homogeneous transforms
+void distance_and_angle(const Eigen::Matrix4d& G,
+                        const Eigen::Matrix4d& H,
+                        double& distance,
+                        double& angle) {
+    // Distance between origins
+    Eigen::Vector3d pG = G.block<3,1>(0,3);
+    Eigen::Vector3d pH = H.block<3,1>(0,3);
+    distance = (pG - pH).norm();
+
+    // Angle between orientations using trace formula
+    Eigen::Matrix3d RG = G.block<3,3>(0,0);
+    Eigen::Matrix3d RH = H.block<3,3>(0,0);
+    double cos_angle = ( (RG.transpose() * RH).trace() - 1.0 ) * 0.5;
+    // Clamp for numerical safety
+    if (cos_angle > 1.0) cos_angle = 1.0;
+    if (cos_angle < -1.0) cos_angle = -1.0;
+    angle = std::acos(cos_angle);
 }

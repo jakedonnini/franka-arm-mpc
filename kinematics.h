@@ -62,4 +62,15 @@ Eigen::Vector<double, 7> IK_velocity(const Eigen::Vector<double, 7>& q_in,
                                      const Eigen::Vector3d& v_in,
                                      const Eigen::Vector3d& omega_in);
 
+// Inverse Kinematics velocity solver given a 6x7 Jacobian directly
+Eigen::Vector<double, 7> IK_velocity_fromJ(const Eigen::Matrix<double, 6, 7>& J,
+                                           const Eigen::Vector3d& v_in,
+                                           const Eigen::Vector3d& omega_in);
+
+// Compute distance (m) and angle (rad) between two homogeneous transforms
+void distance_and_angle(const Eigen::Matrix4d& G,
+                        const Eigen::Matrix4d& H,
+                        double& distance,
+                        double& angle);
+
 #endif // KINEMATICS_H

@@ -18,6 +18,7 @@ mjrContext con;
 GLFWwindow* window;
 
 const char* MODEL_XML = "C:/Users/jaked/Documents/Physics_Sim/mujoco_menagerie-main/mujoco_menagerie-main/franka_emika_panda/mjx_panda.xml";
+const double M_PI = 3.14159265358979323846;
 
 int main() {
     char error_msg[1000] = "Could not load XML";
@@ -33,13 +34,9 @@ int main() {
 
     // camera
     mjv_defaultCamera(&cam);
-    // Get site id for end-effector ("gripper")
-    int gripper_site_id = mj_name2id(m, mjOBJ_SITE, "gripper");
-    if (gripper_site_id < 0) {
-        std::cerr << "Warning: gripper site not found!" << std::endl;
-    }
-
-
+    cam.distance = 4.0;   // distance from target
+    cam.azimuth = 45.0;   // azimuth angle
+    cam.elevation = -30.0; // elevation angle
 
     mjv_defaultOption(&opt);
     mjv_defaultScene(&scn);
@@ -72,7 +69,7 @@ int main() {
     Eigen::Vector<double, controlled_dofs> q_current = Eigen::Vector<double, controlled_dofs>::Zero(); // actual current joint angles
 
 
-    const double Kp = 0.05;
+    const double Kp = 0.01;
     // Removed Kd as it was unused - add back if needed for damping control
 
     Eigen::Matrix<double, 8, 3> jointPositions;
@@ -98,31 +95,14 @@ int main() {
         // Debug: print current joint angles
         std::cout << "q_target: " << q_target.transpose() << std::endl;
         
-        // use old custom functions to compute FK and Jacobian
-        // Create a mutable copy for forwardKinematics (function may modify it)
-        forwardKinematics(q_target, /*out*/ jointPositions, /*out*/ T0e, /*out*/ T_list);
-
-        // compute jacobian with mujoco (using end-effector site)
-        if (gripper_site_id >= 0) {
-            std::vector<double> jacp(3 * m->nv);  // translational jacobian
-            std::vector<double> jacr(3 * m->nv);  // rotational jacobian
-            mj_jacSite(m, d, jacp.data(), jacr.data(), gripper_site_id);
-            
-            // Copy relevant parts to our Jacobian matrix (first 7 DOFs)
-            for (int i = 0; i < 3; ++i) {
-                for (int j = 0; j < std::min(controlled_dofs, 7); ++j) {
-                    J_mujoco(i, j) = jacp[i * m->nv + dof_addr[j]];
-                    J_mujoco(i + 3, j) = jacr[i * m->nv + dof_addr[j]];
-                }
-            }
-            // std::cout << "Mujoco Jacobian:\n" << J_mujoco << std::endl;
-            // std::cout << "Difference in Jacobians:\n" << J - J_mujoco << std::endl;
-        } else {
-            std::cout << "Gripper site not found, skipping MuJoCo Jacobian comparison\n";
-        }
 
         // move end-effector to target
         T_target.block<3,1>(0,3) = Eigen::Vector3d(0.3, 0.0, 0.5);
+        // rotation
+        T_target.block<3,3>(0,0) << 
+            1.0, 0.0, 0.0,   // row 1
+            0.0, 1.0, 0.0,   // row 2
+            0.0, 0.0, 1.0;   // row 3
 
         // Compute Euclidean position difference (3D)
         Eigen::Vector3d dp = diff_to_target(T0e, T_target);
@@ -134,7 +114,7 @@ int main() {
         Eigen::Vector3d omega = calcAngDiff(T_target.block<3,3>(0,0), T0e.block<3,3>(0,0));
         std::cout << "omega (orientation error): " << omega.transpose() << std::endl;
         
-        dq = IK_velocity(q_target, dp, omega);
+        dq = IK_velocity(q_current, dp, omega);
 
         // apply P control to reach target joint positions
         u = Kp * dq;
@@ -144,22 +124,16 @@ int main() {
         q_target += u;
 
         for (int i = 0; i < controlled_dofs; ++i) {
+            // check to make sure we don't exceed joint limits
+            if (q_target[i] < m->jnt_range[joint_ids[i]*2]) {
+                q_target[i] = m->jnt_range[joint_ids[i]*2];
+            } else if (q_target[i] > m->jnt_range[joint_ids[i]*2 + 1]) {
+                q_target[i] = m->jnt_range[joint_ids[i]*2 + 1];
+            }
             d->qpos[qpos_addr[i]] = q_target[i];
         }
 
         mj_step(m, d);
-
-        // --- camera follows end-effector ---
-        if (gripper_site_id >= 0) {
-            // gripper_site_id corresponds to d->site_xpos
-            cam.lookat[0] = d->site_xpos[3*gripper_site_id + 0];
-            cam.lookat[1] = d->site_xpos[3*gripper_site_id + 1];
-            cam.lookat[2] = d->site_xpos[3*gripper_site_id + 2];
-
-            // Optional: keep a fixed distance behind the end-effector
-            cam.distance = 2.0;   // distance from target
-            cam.azimuth += 0.2;   // rotate slowly around gripper
-        }
 
         mjv_updateScene(m, d, &opt, NULL, &cam, mjCAT_ALL, &scn);
         mjr_render(mjrRect{0,0,1200,900}, &scn, &con);
