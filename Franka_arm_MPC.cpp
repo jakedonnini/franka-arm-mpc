@@ -6,6 +6,10 @@
 #include "Optimizer.h"
 #include <GLFW/glfw3.h>
 
+// for delay
+#include <thread>
+#include <chrono>
+
 // Suppress warnings from external libraries
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -19,9 +23,10 @@ mjrContext con;
 GLFWwindow* window;
 
 const char* MODEL_XML = "C:/Users/jaked/Documents/Physics_Sim/mujoco_menagerie-main/mujoco_menagerie-main/franka_emika_panda/mjx_panda.xml";
-const double M_PI = 3.14159265358979323846;
 
 int main() {
+    // MuJoCo may have extra base joints (e.g., floating base), so apply offset
+    const int base_offset = 0; // Set to 1 or 2 if your model has extra base joints
     char error_msg[1000] = "Could not load XML";
     mjModel* m = mj_loadXML(MODEL_XML, NULL, error_msg, sizeof(error_msg));
     if (!m) { std::cerr << "Failed to load model: " << error_msg << std::endl; return 1; }
@@ -60,6 +65,10 @@ int main() {
         }
     }
 
+    std::cout << "joint_ids.size(): " << joint_ids.size() << std::endl;
+    std::cout << "qpos_addr.size(): " << qpos_addr.size() << std::endl;
+    std::cout << "dof_addr.size(): " << dof_addr.size() << std::endl;
+
     // Check we found all 7 joints
     const int controlled_dofs = 7;
     if (controlled_dofs != (int)dof_addr.size()) {
@@ -93,42 +102,44 @@ int main() {
         for (int i=0;i<m->nv;i++) d->qfrc_applied[i] = 0.0;
         // check the current joint angles
         for (int i = 0; i < controlled_dofs; ++i) {
-            q_current[i] = d->qpos[qpos_addr[i]];
+            q_current[i] = d->qpos[qpos_addr[i + base_offset]];
         }
 
         // Debug: print current joint angles
         std::cout << "q_target: " << q_target.transpose() << std::endl;
+        std::cout << "q_current: " << q_current.transpose() << std::endl;
         
         // move end-effector to target
-        T_target.block<3,1>(0,3) = Eigen::Vector3d(0.3, 0.0, 0.5);
+        T_target.block<3,1>(0,3) = Eigen::Vector3d(0.3, 0.0, 0.3);
         // rotation
         T_target.block<3,3>(0,0) << 
             1.0, 0.0, 0.0,   // row 1
             0.0, 1.0, 0.0,   // row 2
             0.0, 0.0, 1.0;   // row 3
 
-        Eigen::Vector<double, 7> q_next = optimizer.step(q_current, T_target);
+        // std::cout << "T_target:\n" << T_target << std::endl;
 
-        // Compute Euclidean position difference (3D)
-        Eigen::Vector3d dp = diff_to_target(T0e, T_target);
-        std::cout << "T0e:\n" << T0e << std::endl;
-        std::cout << "T_target:\n" << T_target << std::endl;
-        std::cout << "dp: " << dp.transpose() << std::endl;
+        Eigen::Vector<double, 7>  dq_step = inverse_kinematics_step(q_current, T_target, 0.1, 0.1);
 
-        // get the change in joint angles to move towards target
-        Eigen::Vector3d omega = calcAngDiff(T_target.block<3,3>(0,0), T0e.block<3,3>(0,0));
-        std::cout << "omega (orientation error): " << omega.transpose() << std::endl;
-        
-        q_target = q_next;
+        std::cout << "dq_step: " << dq_step.transpose() << std::endl;
+        q_target += dq_step; // scale step size
+
+        // check if we are close enough to target
+        if (is_valid_solution(q_current, T_target, 0.1, 0.1)) {
+            std::cout << "Reached target within tolerance.\n";
+            // Optionally break or set a new target
+            break;
+        }
 
         for (int i = 0; i < controlled_dofs; ++i) {
+            int idx = i + base_offset;
             // check to make sure we don't exceed joint limits
-            if (q_target[i] < m->jnt_range[joint_ids[i]*2]) {
-                q_target[i] = m->jnt_range[joint_ids[i]*2];
-            } else if (q_target[i] > m->jnt_range[joint_ids[i]*2 + 1]) {
-                q_target[i] = m->jnt_range[joint_ids[i]*2 + 1];
+            if (q_target[i] < m->jnt_range[joint_ids[idx]*2]) {
+                q_target[i] = m->jnt_range[joint_ids[idx]*2];
+            } else if (q_target[i] > m->jnt_range[joint_ids[idx]*2 + 1]) {
+                q_target[i] = m->jnt_range[joint_ids[idx]*2 + 1];
             }
-            d->qpos[qpos_addr[i]] = q_target[i];
+            d->qpos[qpos_addr[idx]] = q_target[i];
         }
 
         mj_step(m, d);
@@ -141,9 +152,59 @@ int main() {
         double y = d->site_xpos[3*gripper_site + 1];
         double z = d->site_xpos[3*gripper_site + 2];
         std::cout << "End-effector: " << x << "," << y << "," << z << std::endl;
+        // get gripper rotation matrix
+        Eigen::Matrix3d gripper_rot;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                gripper_rot(i, j) = d->site_xmat[gripper_site * 9 + 3 * i + j];
+        std::cout << "Gripper rotation matrix:\n" << gripper_rot << std::endl;
+
+        Eigen::Matrix<double, 6, 7> J_mujoco;
+        std::vector<double> jacp(3 * m->nv, 0.0); // translational Jacobian
+        std::vector<double> jacr(3 * m->nv, 0.0); // rotational Jacobian    
+
+        mj_jacSite(m, d, jacp.data(), jacr.data(), gripper_site);
+
+        // Copy relevant columns for the 7 controlled joints, applying base_offset
+        for (int i = 0; i < controlled_dofs; ++i) {
+            int dof = dof_addr[i + base_offset];
+            for (int j = 0; j < 3; ++j) {
+                J_mujoco(j, i) = jacp[3 * dof + j];
+                J_mujoco(j + 3, i) = jacr[3 * dof + j];
+            }
+        }
+        std::cout << "MuJoCo Jacobian:\n" << J_mujoco << std::endl;
+
+        if (joint_ids.size() >= controlled_dofs + base_offset) {
+            for (int i = 0; i < controlled_dofs; ++i) {
+                int mujoco_joint_id = joint_ids[i + base_offset];
+                // Extract rotation matrix (3x3, row-major)
+                Eigen::Matrix3d R;
+                for (int r = 0; r < 3; ++r)
+                    for (int c = 0; c < 3; ++c)
+                        R(r, c) = d->xmat[mujoco_joint_id * 9 + 3 * r + c];
+
+                // Extract position vector
+                Eigen::Vector3d p;
+                for (int j = 0; j < 3; ++j)
+                    p(j) = d->xpos[mujoco_joint_id * 3 + j];
+
+                // Build 4x4 transformation matrix
+                Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+                T.block<3,3>(0,0) = R;
+                T.block<3,1>(0,3) = p;
+
+                std::cout << "T for joint " << mujoco_joint_id << ":\n" << T << std::endl;
+            }
+        } else {
+            std::cerr << "Not enough joint_ids to apply base offset. Check joint indexing!" << std::endl;
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
+
+        // sleep to control simulation speed
+        // std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
     mjv_freeScene(&scn);

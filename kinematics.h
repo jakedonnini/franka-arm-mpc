@@ -13,13 +13,12 @@ Eigen::Matrix4d Ai(double a_i, double alpha_i, double d_i, double theta_i);
 // OUTPUT:
 //   jointPositions - 8x3 matrix: positions of each joint + end effector in world frame
 //   T0e - 4x4 homogeneous transform of the end effector
+// RETURNS:
 //   T_list - vector of 4x4 transforms from base to each joint + end effector
-void forwardKinematics(
-    Eigen::Vector<double, 7>& q,
+std::vector<Eigen::Matrix4d> forwardKinematics(
+    const Eigen::Vector<double, 7>& q,
     Eigen::Matrix<double, 8, 3>& jointPositions,
-    Eigen::Matrix4d& T0e,
-    std::vector<Eigen::Matrix4d>& T_list
-);
+    Eigen::Matrix4d& T0e);
 
 // Compute the geometric Jacobian for the 7-DOF Panda arm
 // INPUT:  
@@ -27,8 +26,7 @@ void forwardKinematics(
 //   T_list - vector of 4x4 transforms from base to each joint + end effector
 // OUTPUT:
 //   J - 6x7 Jacobian matrix
-void computeJacobian(const Eigen::Vector<double, 7>& q,
-                     const std::vector<Eigen::Matrix4d>& T_list,
+void computeJacobian(const std::vector<Eigen::Matrix4d>& T_list,
                      Eigen::Matrix<double, 6, 7>& J);
 
 // Compute the Euclidean position difference from current to target end-effector pose
@@ -73,4 +71,70 @@ void distance_and_angle(const Eigen::Matrix4d& G,
                         double& distance,
                         double& angle);
 
+/*Given a candidate solution, determine if it achieves the primary task
+and also respects the joint limits.
+
+INPUTS
+q - the candidate solution, namely the joint angles
+target - 4x4 numpy array representing the desired transformation from
+end effector to world
+
+OUTPUTS:
+success - a Boolean which is True if and only if the candidate solution
+produces an end effector pose which is within the given linear and
+angular tolerances of the target pose, and also respects the joint
+limits.
+*/
+bool is_valid_solution(const Eigen::Vector<double, 7>& q,
+                       const Eigen::Matrix4d& T_target, 
+                       double position_tolerance = 0.05, 
+                       double angle_tolerance = 0.1);
+
+// Robust damped pseudoinverse that works for tall or wide Jacobians
+Eigen::MatrixXd dampedPseudoinverse(const Eigen::MatrixXd& J, double lambda = 0.01);
+
+/*
+ Primary task for IK solver. Computes a joint velocity which will reduce
+the error between the target end effector pose and the current end
+effector pose (corresponding to configuration q).
+
+INPUTS:
+q - the current joint configuration, a "best guess" so far for the final answer
+target - a 4x4 numpy array containing the desired end effector pose
+
+OUTPUTS:
+dq - a desired joint velocity to perform this task, which will smoothly
+decay to zero magnitude as the task is achieved
+*/
+Eigen::Vector<double, 7> end_effector_task(const Eigen::Vector<double, 7>& q, const Eigen::Matrix4d& T_target);
+
+/*
+Secondary task for IK solver. Computes a joint velocity which will
+reduce the offset between each joint's angle and the center of its range
+of motion. This secondary task acts as a "soft constraint" which
+encourages the solver to choose solutions within the allowed range of
+motion for the joints.
+
+INPUTS:
+q - the joint angles
+rate - a tunable parameter dictating how quickly to try to center the
+joints. Turning this parameter improves convergence behavior for the
+primary task, but also requires more solver iterations.
+
+OUTPUTS:
+dq - a desired joint velocity to perform this task, which will smoothly
+decay to zero magnitude as the task is achieved
+*/
+Eigen::Vector<double, 7> joint_centering_task(const Eigen::Vector<double, 7>& q, double rate = 0.1);
+
+/*
+computes a single step of an inverse kinematics solver which attempts to
+move the end effector to the target pose for gradient descent.
+*/
+Eigen::Vector<double, 7> inverse_kinematics_step(
+    const Eigen::Vector<double, 7>& q_current,
+    const Eigen::Matrix4d& T_target,
+    double alpha = 0.1,
+    double joint_centering_rate = 0.1
+);
 #endif // KINEMATICS_H
