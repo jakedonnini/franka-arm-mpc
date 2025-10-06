@@ -44,18 +44,6 @@ std::vector<Eigen::Matrix4d> forwardKinematics(
     Eigen::Matrix4d T06 = T05*T56;
     T0e = T06*T6e;
 
-    // Build transform list
-    std::vector<Eigen::Matrix4d> T_list = {
-        Eigen::Matrix4d::Identity(),
-        T01,
-        T02,
-        T03,
-        T04,
-        T05,
-        T06,
-        T0e
-    };
-
     Eigen::Vector4d base(0,0,0,1);
 
     // Optional offsets
@@ -64,6 +52,18 @@ std::vector<Eigen::Matrix4d> forwardKinematics(
     Eigen::Matrix4d T04_offset = Ai(0,0,l7,0);
     Eigen::Matrix4d T05_offset = Ai(0,0,-l12,0);
     Eigen::Matrix4d T06_offset = Ai(0,0,l10,0);
+
+    // Build transform list
+    std::vector<Eigen::Matrix4d> T_list = {
+        T0_offset,
+        T01,
+        T02*T02_offset,
+        T03,
+        T04*T04_offset,
+        T05*T05_offset,
+        T06*T06_offset,
+        T0e
+    };
 
     jointPositions.row(0) = (T0_offset*base).head<3>();
     jointPositions.row(1) = (T01*base).head<3>();
@@ -84,9 +84,9 @@ void computeJacobian(const std::vector<Eigen::Matrix4d>& T_list,
 
     for (int i = 0; i < 7; ++i) {
         Eigen::Matrix3d R = T_list[i].block<3,3>(0,0);
-        // if (i == 1) {
-        //     R = -R; // joint 2 has negative rotation axis
-        // }
+        if (i == 1) {
+            R = -R; // joint 2 has negative rotation axis
+        }
         Eigen::Vector3d Oi = T_list[i].block<3,1>(0,3); // position of the i-th joint
         Eigen::Vector3d z_vector = T_list[i].block<3,1>(0,2); // z-axis of the i-th joint
 
@@ -271,7 +271,7 @@ Eigen::Vector<double, 7> end_effector_task(const Eigen::Vector<double, 7>& q, co
     Eigen::Vector3d displacement = diff_to_target(T0e, T_target);
     Eigen::Vector3d axis = calcAngDiff(T_target.block<3,3>(0,0), T0e.block<3,3>(0,0));
     // Eigen::Vector3d axis = Eigen::Vector3d::Zero(); // placeholder if orientation not needed
-
+    std::cout << "displacement: " << displacement.transpose() << ", axis: " << axis.transpose() << std::endl;
 
     // compute Jacobian and psuedoinverse
     Eigen::Matrix<double, 6, 7> J;
@@ -327,14 +327,14 @@ Eigen::Vector<double, 7> inverse_kinematics_step(
     Eigen::Matrix<double, 7, 6> J_pseudo = dampedPseudoinverse(J);
 
     std::cout << "J:\n" << J << std::endl;
-    for (int i = 0; i < T_list.size(); ++i)
-        std::cout << "T_list " << i << ": " << T_list[i] << std::endl;
+    // for (int i = 0; i < T_list.size(); ++i)
+        // std::cout << "T_list " << i << ": " << T_list[i] << std::endl;
     // std::cout << "J_pseudo:\n" << J_pseudo << std::endl;
 
     Eigen::Matrix<double, 7, 7> I = Eigen::Matrix<double, 7, 7>::Identity();
     Eigen::Matrix<double, 7, 7> N = I - J_pseudo * J; // Nullspace projector
 
-    Eigen::Vector<double, 7> dq = dq_primary; // + N * dq_secondary;
+    Eigen::Vector<double, 7> dq = dq_primary + N * dq_secondary;
 
     // Scale by step size alpha
     dq *= alpha;

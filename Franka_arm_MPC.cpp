@@ -78,8 +78,10 @@ int main() {
     std::cout << "Found " << controlled_dofs << " Panda joints to control.\n";
 
     // Initialize target joint positions to zero (home position)
-    Eigen::Vector<double, controlled_dofs> q_target = Eigen::Vector<double, controlled_dofs>::Zero(); // calculated current joint angles
-    Eigen::Vector<double, controlled_dofs> q_current = Eigen::Vector<double, controlled_dofs>::Zero(); // actual current joint angles
+    // Set initial joint positions to home seed: [0, 0, 0, -pi/2, 0, pi/2, pi/4]
+    Eigen::Vector<double, controlled_dofs> q_target;
+    q_target << 0.0, 0.0, 0.0, -M_PI/2, 0.0, M_PI/2, M_PI/4;
+    Eigen::Vector<double, controlled_dofs> q_current = q_target;
 
 
     const double Kp = 0.01;
@@ -110,12 +112,12 @@ int main() {
         std::cout << "q_current: " << q_current.transpose() << std::endl;
         
         // move end-effector to target
-        T_target.block<3,1>(0,3) = Eigen::Vector3d(0.3, 0.0, 0.3);
+        T_target.block<3,1>(0,3) = Eigen::Vector3d(-0.2, 0.0, 0.5);
         // rotation
         T_target.block<3,3>(0,0) << 
-            1.0, 0.0, 0.0,   // row 1
-            0.0, 1.0, 0.0,   // row 2
-            0.0, 0.0, 1.0;   // row 3
+            0.0, -1.0, 0.0,   // row 1
+            -1.0, 0.0, 0.0,   // row 2
+            0.0, 0.0, -1.0;   // row 3
 
         // std::cout << "T_target:\n" << T_target << std::endl;
 
@@ -173,7 +175,7 @@ int main() {
                 J_mujoco(j + 3, i) = jacr[3 * dof + j];
             }
         }
-        std::cout << "MuJoCo Jacobian:\n" << J_mujoco << std::endl;
+        // std::cout << "MuJoCo Jacobian:\n" << J_mujoco << std::endl;
 
         if (joint_ids.size() >= controlled_dofs + base_offset) {
             for (int i = 0; i < controlled_dofs; ++i) {
@@ -194,7 +196,7 @@ int main() {
                 T.block<3,3>(0,0) = R;
                 T.block<3,1>(0,3) = p;
 
-                std::cout << "T for joint " << mujoco_joint_id << ":\n" << T << std::endl;
+                // std::cout << "T for joint " << mujoco_joint_id << ":\n" << T << std::endl;
             }
         } else {
             std::cerr << "Not enough joint_ids to apply base offset. Check joint indexing!" << std::endl;
