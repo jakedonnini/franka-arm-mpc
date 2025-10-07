@@ -137,4 +137,45 @@ Eigen::Vector<double, 7> inverse_kinematics_step(
     double alpha = 0.1,
     double joint_centering_rate = 0.1
 );
+
+// -------------------------------------------------------------
+// KinematicsCache: caches FK (T_list, joint positions, T0e) and Jacobian
+// to avoid redundant recomputation inside iterative IK loops.
+// -------------------------------------------------------------
+class KinematicsCache {
+public:
+    KinematicsCache();
+
+    void setConfiguration(const Eigen::Vector<double,7>& q);
+    const Eigen::Vector<double,7>& q() const { return q_; }
+
+    // Ensure FK computed
+    void ensureFK();
+    // Ensure Jacobian computed
+    void ensureJacobian();
+
+    const std::vector<Eigen::Matrix4d>& T_list() { ensureFK(); return T_list_; }
+    const Eigen::Matrix<double,8,3>& jointPositions() { ensureFK(); return jointPositions_; }
+    const Eigen::Matrix4d& T0e() { ensureFK(); return T0e_; }
+    const Eigen::Matrix<double,6,7>& J() { ensureJacobian(); return J_; }
+
+    void invalidate() { dirty_fk_ = true; dirty_jac_ = true; }
+
+private:
+    Eigen::Vector<double,7> q_;
+    Eigen::Matrix<double,8,3> jointPositions_;
+    Eigen::Matrix4d T0e_ = Eigen::Matrix4d::Identity();
+    std::vector<Eigen::Matrix4d> T_list_;
+    Eigen::Matrix<double,6,7> J_;
+    bool dirty_fk_ = true;
+    bool dirty_jac_ = true;
+};
+
+// Optimized IK step using cached FK/Jacobian (single computation per call)
+Eigen::Vector<double,7> inverse_kinematics_step_optimized(
+    KinematicsCache& cache,
+    const Eigen::Matrix4d& T_target,
+    double alpha = 0.1,
+    double joint_centering_rate = 0.1
+);
 #endif // KINEMATICS_H

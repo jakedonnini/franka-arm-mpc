@@ -121,7 +121,10 @@ int main() {
 
         // std::cout << "T_target:\n" << T_target << std::endl;
 
-        Eigen::Vector<double, 7>  dq_step = inverse_kinematics_step(q_current, T_target, 0.1, 0.05);
+        // Eigen::Vector<double, 7>  dq_step = inverse_kinematics_step(q_current, T_target, 0.1, 0.05);
+        static KinematicsCache cache;
+        cache.setConfiguration(q_current);
+        Eigen::Vector<double, 7> dq_step = inverse_kinematics_step_optimized(cache, T_target, 0.1, 0.1);
 
         std::cout << "dq_step: " << dq_step.transpose() << std::endl;
         q_target += dq_step; // scale step size
