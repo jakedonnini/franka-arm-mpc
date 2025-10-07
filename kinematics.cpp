@@ -83,15 +83,19 @@ void computeJacobian(const std::vector<Eigen::Matrix4d>& T_list,
     Eigen::Vector3d On = T_list.back().block<3,1>(0,3); // end-effector position
 
     for (int i = 0; i < 7; ++i) {
-        Eigen::Matrix3d R = T_list[i].block<3,3>(0,0);
-        if (i == 1) {
-            R = -R; // joint 2 has negative rotation axis
-        }
-        Eigen::Vector3d Oi = T_list[i].block<3,1>(0,3); // position of the i-th joint
-        Eigen::Vector3d z_vector = T_list[i].block<3,1>(0,2); // z-axis of the i-th joint
+        Eigen::Vector3d Oi = T_list[i].block<3,1>(0,3); // joint origin
+        Eigen::Vector3d z_vector = T_list[i].block<3,1>(0,2); // joint axis (revolute about z in DH frame)
 
         Eigen::Vector3d Ji_pos = z_vector.cross(On - Oi);
         Eigen::Vector3d Ji_ori = z_vector;
+
+        // Joint 2 (index 1) was modeled with a negative angle (-q[1]) in FK (T12 uses -q[1]).
+        // That flips the derivative sign relative to using +q[1]. Apply correction so the
+        // analytic Jacobian matches the numeric derivative and MuJoCo convention.
+        if (i == 1) {
+            Ji_pos = -Ji_pos;
+            Ji_ori = -Ji_ori;
+        }
 
         J.block<3,1>(0,i) = Ji_pos;
         J.block<3,1>(3,i) = Ji_ori;
@@ -326,7 +330,7 @@ Eigen::Vector<double, 7> inverse_kinematics_step(
     computeJacobian(T_list, J);
     Eigen::Matrix<double, 7, 6> J_pseudo = dampedPseudoinverse(J);
 
-    std::cout << "J:\n" << J << std::endl;
+    // std::cout << "J:\n" << J << std::endl;
     // for (int i = 0; i < T_list.size(); ++i)
         // std::cout << "T_list " << i << ": " << T_list[i] << std::endl;
     // std::cout << "J_pseudo:\n" << J_pseudo << std::endl;

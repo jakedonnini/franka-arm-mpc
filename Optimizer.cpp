@@ -59,7 +59,7 @@ double Optimizer::cost(const Eigen::Vector<double, 7>& q, const Eigen::Matrix4d&
     Eigen::Matrix4d T0e;
     std::vector<Eigen::Matrix4d> T_list;
     Eigen::Vector<double, 7> q_copy = q; // forwardKinematics requires non-const reference
-    forwardKinematics(q_copy, jointPositions, T0e, T_list);
+    T_list = forwardKinematics(q_copy, jointPositions, T0e);
     Eigen::Vector3d dp = diff_to_target(T0e, T_target);
     return dp.squaredNorm(); // minimize squared distance
 }

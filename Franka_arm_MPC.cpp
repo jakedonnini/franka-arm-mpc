@@ -121,13 +121,13 @@ int main() {
 
         // std::cout << "T_target:\n" << T_target << std::endl;
 
-        Eigen::Vector<double, 7>  dq_step = inverse_kinematics_step(q_current, T_target, 0.1, 0.1);
+        Eigen::Vector<double, 7>  dq_step = inverse_kinematics_step(q_current, T_target, 0.1, 0.05);
 
         std::cout << "dq_step: " << dq_step.transpose() << std::endl;
         q_target += dq_step; // scale step size
 
         // check if we are close enough to target
-        if (is_valid_solution(q_current, T_target, 0.1, 0.1)) {
+        if (is_valid_solution(q_current, T_target, 0.2, 0.2)) {
             std::cout << "Reached target within tolerance.\n";
             // Optionally break or set a new target
             break;
@@ -149,6 +149,8 @@ int main() {
         mjv_updateScene(m, d, &opt, NULL, &cam, mjCAT_ALL, &scn);
         mjr_render(mjrRect{0,0,1200,900}, &scn, &con);
 
+
+        // ---- get end-effector position from simulation ----
         int gripper_site = mj_name2id(m, mjOBJ_SITE, "gripper");
         double x = d->site_xpos[3*gripper_site + 0];
         double y = d->site_xpos[3*gripper_site + 1];
@@ -160,47 +162,6 @@ int main() {
             for (int j = 0; j < 3; ++j)
                 gripper_rot(i, j) = d->site_xmat[gripper_site * 9 + 3 * i + j];
         std::cout << "Gripper rotation matrix:\n" << gripper_rot << std::endl;
-
-        Eigen::Matrix<double, 6, 7> J_mujoco;
-        std::vector<double> jacp(3 * m->nv, 0.0); // translational Jacobian
-        std::vector<double> jacr(3 * m->nv, 0.0); // rotational Jacobian    
-
-        mj_jacSite(m, d, jacp.data(), jacr.data(), gripper_site);
-
-        // Copy relevant columns for the 7 controlled joints, applying base_offset
-        for (int i = 0; i < controlled_dofs; ++i) {
-            int dof = dof_addr[i + base_offset];
-            for (int j = 0; j < 3; ++j) {
-                J_mujoco(j, i) = jacp[3 * dof + j];
-                J_mujoco(j + 3, i) = jacr[3 * dof + j];
-            }
-        }
-        // std::cout << "MuJoCo Jacobian:\n" << J_mujoco << std::endl;
-
-        if (joint_ids.size() >= controlled_dofs + base_offset) {
-            for (int i = 0; i < controlled_dofs; ++i) {
-                int mujoco_joint_id = joint_ids[i + base_offset];
-                // Extract rotation matrix (3x3, row-major)
-                Eigen::Matrix3d R;
-                for (int r = 0; r < 3; ++r)
-                    for (int c = 0; c < 3; ++c)
-                        R(r, c) = d->xmat[mujoco_joint_id * 9 + 3 * r + c];
-
-                // Extract position vector
-                Eigen::Vector3d p;
-                for (int j = 0; j < 3; ++j)
-                    p(j) = d->xpos[mujoco_joint_id * 3 + j];
-
-                // Build 4x4 transformation matrix
-                Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
-                T.block<3,3>(0,0) = R;
-                T.block<3,1>(0,3) = p;
-
-                // std::cout << "T for joint " << mujoco_joint_id << ":\n" << T << std::endl;
-            }
-        } else {
-            std::cerr << "Not enough joint_ids to apply base offset. Check joint indexing!" << std::endl;
-        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
