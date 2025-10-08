@@ -9,58 +9,71 @@
 #include "Optimizer.h"
 
 // optimizer class for MPC
+KinematicsCache Optimizer::cache; // define static cache
 
-// create optimizer function for forward kinematics
 Eigen::Vector<double, 7> Optimizer::step(const Eigen::Vector<double, 7>& q_current, const Eigen::Matrix4d& T_target) {
-    // use the current cost so new cost is always lower
-    double min_cost = cost(q_current, T_target);
-    Eigen::Vector<double, 7> q_best = q_current;
+    // Initialize
+    cache.setConfiguration(q_current);
+    Eigen::Matrix4d T0e = cache.T0e();
+    double best_cost = cost(q_current, T_target, T0e);
+    Eigen::Vector<double,7> q_best = q_current;
 
-    // iterate to minimize distance to target
-    for (double j1 = -1; j1 <= 1; j1 += alpha) {
-        std::cout << "j1: " << j1 << std::endl;
-        for (double j2 = -1; j2 <= 1; j2 += alpha) {
-            std::cout << "j2: " << j2 << std::endl;
-            for (double j3 = -1; j3 <= 1; j3 += alpha) {
-                for (double j4 = -1; j4 <= 1; j4 += alpha) {
-                    for (double j5 = -1; j5 <= 1; j5 += alpha) {
-                        for (double j6 = -1; j6 <= 1; j6 += alpha) {
-                            for (double j7 = -1; j7 <= 1; j7 += alpha) {
-                                Eigen::Vector<double, 7> q_new = q_current;
-                                q_new[0] += j1 * alpha;
-                                q_new[1] += j2 * alpha;
-                                q_new[2] += j3 * alpha;
-                                q_new[3] += j4 * alpha;
-                                q_new[4] += j5 * alpha;
-                                q_new[5] += j6 * alpha;
-                                q_new[6] += j7 * alpha;
+    // Simple local search in task space position (coarse heuristic)
+    for (double step_x = -alpha; step_x <= alpha; step_x += alpha) {
+        for (double step_y = -alpha; step_y <= alpha; step_y += alpha) {
+            for (double step_z = -alpha; step_z <= alpha; step_z += alpha) {
+                Eigen::Matrix4d T_waypoint = Eigen::Matrix4d::Identity();
+                T_waypoint.block<3,1>(0, 3) = T0e.block<3,1>(0, 3); // copy current position
+                T_waypoint.block<3,3>(0, 0) = T_target.block<3,3>(0, 0); // use target orientation
+                T_waypoint(0,3) += step_x;
+                T_waypoint(1,3) += step_y;
+                T_waypoint(2,3) += step_z;
 
-                                double c_new = cost(q_new, T_target);
+                // One IK step towards waypoint
+                cache.setConfiguration(q_current);
+                Eigen::Vector<double,7> dq = inverse_kinematics_step_optimized(cache, T_waypoint, 0.05, 0.1);
+                Eigen::Vector<double,7> q_candidate = q_current + dq;
 
-                                if (c_new < min_cost) {
-                                    min_cost = c_new;
-                                    q_best = q_new; // update current to new
-                                }
-                            }
-                        }
-                    }
+                // Evaluate candidate
+                Eigen::Vector<double,7> q_copy = q_candidate;
+                cache.setConfiguration(q_copy);
+                cache.ensureFK();
+                Eigen::Matrix4d T_candidate = cache.T0e();
+                double c = cost(q_candidate, T_target, T_candidate);
+                if (c < best_cost) {
+                    best_cost = c;
+                    q_best = q_candidate;
                 }
             }
         }
     }
-
-    return q_best; // return the best found configuration
+    return q_best;
 }
 
 // cost function to minimize distance to target
-double Optimizer::cost(const Eigen::Vector<double, 7>& q, const Eigen::Matrix4d& T_target) {
+double Optimizer::cost(const Eigen::Vector<double, 7>& q, const Eigen::Matrix4d& T_target, const Eigen::Matrix4d& T0e) {
     // TODO add more rules to cost function for obstacle avoidance, joint limits, etc.
-    Eigen::Matrix<double, 8, 3> jointPositions;
-    Eigen::Matrix4d T0e;
-    std::vector<Eigen::Matrix4d> T_list;
-    Eigen::Vector<double, 7> q_copy = q; // forwardKinematics requires non-const reference
-    T_list = forwardKinematics(q_copy, jointPositions, T0e);
-    Eigen::Vector3d dp = diff_to_target(T0e, T_target);
-    return dp.squaredNorm(); // minimize squared distance
+    double distance, angle;
+    distance_and_angle(T0e, T_target, distance, angle);
+
+    double angle_gain = 0.5; // weight for angle in cost function
+
+    if (!has_colided(q)) {
+        return 1e6; // invalid solution, return high cost
+    }
+
+    return distance * distance + angle_gain * angle * angle; // minimize squared distance and angle
+}
+
+bool Optimizer::has_colided(const Eigen::Vector<double, 7>& q) {
+    // TODO implement collision checking
+
+    for (int i = 0; i < 7; ++i) {
+        if (q[i] < lower_limits[i] || q[i] > upper_limits[i]) {
+            return true; // Out of bounds
+        }
+    }
+
+    return false;
 }
 

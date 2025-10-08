@@ -224,6 +224,7 @@ bool is_valid_solution(const Eigen::Vector<double, 7>& q, const Eigen::Matrix4d&
         }
     }
 
+
     Eigen::Matrix<double, 8, 3> jointPositions;
     Eigen::Matrix4d T0e;
     std::vector<Eigen::Matrix4d> T_list;
@@ -381,6 +382,7 @@ Eigen::Vector<double,7> inverse_kinematics_step_optimized(
     const auto& q_current = cache.q();
 
     // Primary task twist (position + orientation error)
+    // replecates end_effector_task but uses cached FK/Jacobian
     Eigen::Vector3d displacement = diff_to_target(T0e, T_target);
     Eigen::Vector3d axis = calcAngDiff(T_target.block<3,3>(0,0), T0e.block<3,3>(0,0));
     Eigen::Matrix<double,6,1> twist;

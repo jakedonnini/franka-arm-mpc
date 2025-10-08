@@ -112,7 +112,7 @@ int main() {
         std::cout << "q_current: " << q_current.transpose() << std::endl;
         
         // move end-effector to target
-        T_target.block<3,1>(0,3) = Eigen::Vector3d(-0.2, 0.0, 0.5);
+        T_target.block<3,1>(0,3) = Eigen::Vector3d(0.5, 0.0, 0.5);
         // rotation
         T_target.block<3,3>(0,0) << 
             0.0, -1.0, 0.0,   // row 1
@@ -122,18 +122,23 @@ int main() {
         // std::cout << "T_target:\n" << T_target << std::endl;
 
         // Eigen::Vector<double, 7>  dq_step = inverse_kinematics_step(q_current, T_target, 0.1, 0.05);
+
         static KinematicsCache cache;
         cache.setConfiguration(q_current);
         Eigen::Vector<double, 7> dq_step = inverse_kinematics_step_optimized(cache, T_target, 0.1, 0.1);
 
-        std::cout << "dq_step: " << dq_step.transpose() << std::endl;
         q_target += dq_step; // scale step size
+
+        // use optimizer to get next joint positions
+        // Eigen::Vector<double, controlled_dofs> q_new = optimizer.step(q_current, T_target);
+        // q_target = q_new;
+        
 
         // check if we are close enough to target
         if (is_valid_solution(q_current, T_target, 0.2, 0.2)) {
             std::cout << "Reached target within tolerance.\n";
             // Optionally break or set a new target
-            break;
+            while (true);
         }
 
         for (int i = 0; i < controlled_dofs; ++i) {

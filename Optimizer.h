@@ -18,7 +18,10 @@ private:
     int predict_horizon = 10;
     int control_horizon = 5;
     double alpha = 0.1;  // step size
-    double tol = 1e-4;
+    double tol = 1e-4; 
+    const double lower_limits[7] = {-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973};
+    const double upper_limits[7] = { 2.8973,  1.7628,  2.8973, -0.0698,  2.8973,  3.7525,  2.8973};
+    static KinematicsCache cache; // create a static cache for IK optimization to be used across calls
 
 public:
     // Constructor & Destructor
@@ -32,10 +35,10 @@ public:
     );
 
     // Cost function to minimize distance to target
-    double cost(
-        const Eigen::Vector<double, 7>& q,
-        const Eigen::Matrix4d& T_target
-    );
+    double cost(const Eigen::Vector<double, 7>& q, const Eigen::Matrix4d& T_target, const Eigen::Matrix4d& T0e);
+
+    // Check for collisions (stub function, implement as needed)
+    bool has_colided(const Eigen::Vector<double, 7>& q);
 };
 
 #endif // OPTIMIZER_H
