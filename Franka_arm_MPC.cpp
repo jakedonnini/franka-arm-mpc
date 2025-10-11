@@ -22,7 +22,38 @@ mjvScene scn;
 mjrContext con; 
 GLFWwindow* window;
 
-const char* MODEL_XML = "C:/Users/jaked/Documents/Physics_Sim/mujoco_menagerie-main/mujoco_menagerie-main/franka_emika_panda/mjx_panda.xml";
+// const char* MODEL_XML = "C:/Users/jaked/Documents/Physics_Sim/mujoco_menagerie-main/mujoco_menagerie-main/franka_emika_panda/mjx_panda.xml";
+const char* MODEL_XML = "C:/Users/jaked/Documents/Physics_Sim/mjx_panda_MPC.xml";
+
+
+// update perdiction horizon markers
+struct MarkerIds {
+    int target_body;
+    std::vector<int> pred_bodies;
+};
+
+MarkerIds initMarkers(mjModel* m, int num_predictions) {
+    MarkerIds ids;
+    ids.target_body = mj_name2id(m, mjOBJ_BODY, "target_marker_body");
+    for (int i = 0; i < num_predictions; ++i) {
+        std::string name = "ee_pred_" + std::to_string(i) + "_body";
+        int bid = mj_name2id(m, mjOBJ_BODY, name.c_str());
+        ids.pred_bodies.push_back(bid);
+    }
+    return ids;
+}
+
+void setMocapBodyPos(mjData* d, int body_id, const Eigen::Vector3d& p) {
+    if (body_id < 0) return;
+    d->mocap_pos[3*body_id + 0] = p.x();
+    d->mocap_pos[3*body_id + 1] = p.y();
+    d->mocap_pos[3*body_id + 2] = p.z();
+    // Keep orientation identity
+    d->mocap_quat[4*body_id + 0] = 1.0;
+    d->mocap_quat[4*body_id + 1] = 0.0;
+    d->mocap_quat[4*body_id + 2] = 0.0;
+    d->mocap_quat[4*body_id + 3] = 0.0;
+}
 
 int main() {
     // MuJoCo may have extra base joints (e.g., floating base), so apply offset
@@ -40,6 +71,12 @@ int main() {
 
     // create the optimizer class
     Optimizer optimizer;
+
+    // MPC variables
+    const int predict_horizon = optimizer.predict_horizon;
+    const int control_horizon = optimizer.control_horizon;
+    MarkerIds markers = initMarkers(m, predict_horizon);
+
 
     // camera
     mjv_defaultCamera(&cam);
@@ -119,26 +156,48 @@ int main() {
             -1.0, 0.0, 0.0,   // row 2
             0.0, 0.0, -1.0;   // row 3
 
+        // ---- update target marker position ----
+        setMocapBodyPos(d, markers.target_body, T_target.block<3,1>(0,3));
+
         // std::cout << "T_target:\n" << T_target << std::endl;
 
         // Eigen::Vector<double, 7>  dq_step = inverse_kinematics_step(q_current, T_target, 0.1, 0.05);
 
-        static KinematicsCache cache;
-        cache.setConfiguration(q_current);
-        Eigen::Vector<double, 7> dq_step = inverse_kinematics_step_optimized(cache, T_target, 0.1, 0.1);
+        // static KinematicsCache cache;
+        // IK cache (declared once, reused each loop)
+        // static KinematicsCache cache;
+        // cache.setConfiguration(q_current);
+        // Eigen::Vector<double, 7> dq_step = inverse_kinematics_step_optimized(cache, T_target, 0.1, 0.1);
 
-        q_target += dq_step; // scale step size
+        // q_target += dq_step; // scale step size
 
         // use optimizer to get next joint positions
-        // Eigen::Vector<double, controlled_dofs> q_new = optimizer.step(q_current, T_target);
-        // q_target = q_new;
+        Eigen::Vector<double, controlled_dofs> q_new = q_current;
+        Eigen::Vector<double, controlled_dofs> q_predict_frontire = q_new;
+        // vector storing predicted states for analysis
+        std::vector<Eigen::Vector<double, controlled_dofs>> predicted_states;
+        for (int i = 0; i < predict_horizon; ++i) {
+            q_new = optimizer.step(q_predict_frontire, T_target);
+            predicted_states.push_back(q_new);
+            q_predict_frontire = q_new;
+
+            // fk to find predicted end-effector position
+            Eigen::Matrix4d T0e_pred;
+            Eigen::Matrix<double, 8, 3> jointPositions_pred;
+            forwardKinematics(q_new, jointPositions_pred, T0e_pred);
+            // set the prediction markers in the simulation
+            setMocapBodyPos(d, markers.pred_bodies[i], T0e_pred.block<3,1>(0,3));
+            std::cout << "Predicted state " << i << ": " << T0e_pred.block<3,1>(0,3).transpose() << std::endl;
+        }
+        
+        q_target = q_predict_frontire.eval(); // apply only the first control input
         
 
         // check if we are close enough to target
         if (is_valid_solution(q_current, T_target, 0.2, 0.2)) {
             std::cout << "Reached target within tolerance.\n";
             // Optionally break or set a new target
-            while (true);
+            break;
         }
 
         for (int i = 0; i < controlled_dofs; ++i) {
@@ -175,7 +234,7 @@ int main() {
         glfwPollEvents();
 
         // sleep to control simulation speed
-        // std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
     mjv_freeScene(&scn);
