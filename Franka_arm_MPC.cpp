@@ -55,6 +55,20 @@ void setMocapBodyPos(mjData* d, int body_id, const Eigen::Vector3d& p) {
     d->mocap_quat[4*body_id + 3] = 0.0;
 }
 
+Eigen::Matrix4d pickRandomTarget() {
+    Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+    // Random position within a cube of side length 0.4m centered at (0.5, 0, 0.5)
+    T(0,3) = 0.2 + static_cast<double>(rand()) / RAND_MAX * 0.4; // x in [0.2, 0.6]
+    T(1,3) = -0.3 + static_cast<double>(rand()) / RAND_MAX * 0.6; // y in [-0.3, 0.3]
+    T(2,3) = 0.2 + static_cast<double>(rand()) / RAND_MAX * 0.4; // z in [0.2, 0.6]
+    // Fixed orientation (pointing forward)
+    T.block<3,3>(0,0) << 
+        1, 0, 0,
+        0, -1, 0,
+        0, 0, -1;
+    return T;
+}
+
 int main() {
     // MuJoCo may have extra base joints (e.g., floating base), so apply offset
     const int base_offset = 0; // Set to 1 or 2 if your model has extra base joints
@@ -73,8 +87,8 @@ int main() {
     Optimizer optimizer;
 
     // MPC variables
-    const int predict_horizon = optimizer.predict_horizon;
-    const int control_horizon = optimizer.control_horizon;
+    const int predict_horizon = optimizer.get_predict_horizon();
+    const int control_horizon = optimizer.get_control_horizon();
     MarkerIds markers = initMarkers(m, predict_horizon);
 
 
@@ -135,6 +149,9 @@ int main() {
     Eigen::Vector<double, controlled_dofs> u;
     Eigen::Vector<double, controlled_dofs> dq;
 
+    // pick an initial random target
+    T_target = pickRandomTarget();
+
 
 
     while (!glfwWindowShouldClose(window)) {
@@ -147,14 +164,6 @@ int main() {
         // Debug: print current joint angles
         std::cout << "q_target: " << q_target.transpose() << std::endl;
         std::cout << "q_current: " << q_current.transpose() << std::endl;
-        
-        // move end-effector to target
-        T_target.block<3,1>(0,3) = Eigen::Vector3d(0.5, 0.0, 0.5);
-        // rotation
-        T_target.block<3,3>(0,0) << 
-            0.0, -1.0, 0.0,   // row 1
-            -1.0, 0.0, 0.0,   // row 2
-            0.0, 0.0, -1.0;   // row 3
 
         // ---- update target marker position ----
         setMocapBodyPos(d, markers.target_body, T_target.block<3,1>(0,3));
@@ -163,41 +172,40 @@ int main() {
 
         // Eigen::Vector<double, 7>  dq_step = inverse_kinematics_step(q_current, T_target, 0.1, 0.05);
 
-        // static KinematicsCache cache;
+        static KinematicsCache cache;
         // IK cache (declared once, reused each loop)
-        // static KinematicsCache cache;
-        // cache.setConfiguration(q_current);
-        // Eigen::Vector<double, 7> dq_step = inverse_kinematics_step_optimized(cache, T_target, 0.1, 0.1);
+        cache.setConfiguration(q_current);
+        Eigen::Vector<double, 7> dq_step = inverse_kinematics_step_optimized(cache, T_target, 0.1, 0.1);
 
-        // q_target += dq_step; // scale step size
+        q_target += dq_step; // scale step size
 
         // use optimizer to get next joint positions
-        Eigen::Vector<double, controlled_dofs> q_new = q_current;
-        Eigen::Vector<double, controlled_dofs> q_predict_frontire = q_new;
-        // vector storing predicted states for analysis
-        std::vector<Eigen::Vector<double, controlled_dofs>> predicted_states;
-        for (int i = 0; i < predict_horizon; ++i) {
-            q_new = optimizer.step(q_predict_frontire, T_target);
-            predicted_states.push_back(q_new);
-            q_predict_frontire = q_new;
+        // Eigen::Vector<double, controlled_dofs> q_new = q_current;
+        // Eigen::Vector<double, controlled_dofs> q_predict_frontire = q_new;
+        // // vector storing predicted states for analysis
+        // std::vector<Eigen::Vector<double, controlled_dofs>> predicted_states;
+        // for (int i = 0; i < predict_horizon; ++i) {
+        //     q_new = optimizer.step(q_predict_frontire, T_target);
+        //     predicted_states.push_back(q_new);
+        //     q_predict_frontire = q_new;
 
-            // fk to find predicted end-effector position
-            Eigen::Matrix4d T0e_pred;
-            Eigen::Matrix<double, 8, 3> jointPositions_pred;
-            forwardKinematics(q_new, jointPositions_pred, T0e_pred);
-            // set the prediction markers in the simulation
-            setMocapBodyPos(d, markers.pred_bodies[i], T0e_pred.block<3,1>(0,3));
-            std::cout << "Predicted state " << i << ": " << T0e_pred.block<3,1>(0,3).transpose() << std::endl;
-        }
+        //     // fk to find predicted end-effector position
+        //     Eigen::Matrix4d T0e_pred;
+        //     Eigen::Matrix<double, 8, 3> jointPositions_pred;
+        //     forwardKinematics(q_new, jointPositions_pred, T0e_pred);
+        //     // set the prediction markers in the simulation
+        //     setMocapBodyPos(d, markers.pred_bodies[i], T0e_pred.block<3,1>(0,3));
+        //     std::cout << "Predicted state " << i << ": " << T0e_pred.block<3,1>(0,3).transpose() << std::endl;
+        // }
         
-        q_target = q_predict_frontire.eval(); // apply only the first control input
+        // q_target = q_predict_frontire.eval(); // apply only the first control input
         
 
         // check if we are close enough to target
-        if (is_valid_solution(q_current, T_target, 0.2, 0.2)) {
+        if (is_valid_solution(q_current, T_target, 0.05, 0.05)) {
             std::cout << "Reached target within tolerance.\n";
             // Optionally break or set a new target
-            break;
+            T_target = pickRandomTarget();
         }
 
         for (int i = 0; i < controlled_dofs; ++i) {
@@ -234,7 +242,7 @@ int main() {
         glfwPollEvents();
 
         // sleep to control simulation speed
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
     mjv_freeScene(&scn);

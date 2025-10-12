@@ -39,6 +39,10 @@ public:
 
     // Check for collisions (stub function, implement as needed)
     bool has_colided(const Eigen::Vector<double, 7>& q);
+
+    // Getters for horizons
+    int get_predict_horizon() const;
+    int get_control_horizon() const;
 };
 
 #endif // OPTIMIZER_H

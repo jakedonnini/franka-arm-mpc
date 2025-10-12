@@ -91,3 +91,11 @@ bool Optimizer::has_colided(const Eigen::Vector<double, 7>& q) {
     return false;
 }
 
+int Optimizer::get_predict_horizon() const {
+    return predict_horizon;
+}
+
+int Optimizer::get_control_horizon() const {
+    return control_horizon;
+}
+
