@@ -1,3 +1,6 @@
+
+<img width="958" height="711" alt="Panda_IK" src="https://github.com/user-attachments/assets/19b9df03-b5f1-427b-9ddc-2cbd3071cef0" />
+
 # Franka Arm MPC Physics Simulation
 
 ![Ik_example](https://github.com/user-attachments/assets/b999048d-1a5f-4094-b9f2-b8a3d02de1d9)
