@@ -1,5 +1,8 @@
 # Franka Arm MPC Physics Simulation
 
+![Ik_example](https://github.com/user-attachments/assets/b999048d-1a5f-4094-b9f2-b8a3d02de1d9)
+
+
 A Model Predictive Control (MPC) implementation for the Franka Emika Panda robot arm using MuJoCo physics simulation.
 
 ## Features
